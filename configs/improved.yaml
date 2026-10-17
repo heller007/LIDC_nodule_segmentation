@@ -1,0 +1,35 @@
+# Main proposal. Changes vs the notebook, each independently ablatable:
+#   - patient-grouped split (no leakage)
+#   - all nodules per patient, not just nodule-0
+#   - ImageNet-correct encoder input scaling
+#   - full LinkNet skips (dec3/dec4 reconnected)
+#   - per-image loss and per-image metrics
+#   - fresh augmentation each epoch, batch 16, AdamW + cosine warmup
+#   - 8-way TTA and small-component removal at inference
+_base_: base.yaml
+name: improved
+
+model:
+  attention: scanext
+  use_skips: true
+  imagenet_preprocess: true
+  deep_supervision: true
+  aux_weight: 0.2
+  dropout: 0.05
+
+loss:
+  name: tversky_focal
+  per_image: true
+
+train:
+  epochs: 120
+  batch_size: 16
+  lr: 3.0e-4
+  optimizer: adamw
+  schedule: cosine
+  warmup_epochs: 3
+  freeze_encoder_epochs: 2
+
+eval:
+  tta: true
+  min_component_px: 4

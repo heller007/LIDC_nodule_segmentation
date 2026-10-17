@@ -1,0 +1,9 @@
+# 5-fold patient-grouped cross-validation. Run with --fold 0..4; every patient
+# lands in test exactly once, so the mean is not one lucky split.
+_base_: improved.yaml
+name: improved_cv5
+
+split:
+  mode: patient
+  folds: 5
+  fold: 0

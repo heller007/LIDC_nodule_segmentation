@@ -1,0 +1,6 @@
+# Attention removed -- isolates how much the attention block actually buys.
+_base_: improved.yaml
+name: improved_noattn
+
+model:
+  attention: none

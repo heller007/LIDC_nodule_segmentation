@@ -1,0 +1,7 @@
+# Improved pipeline with the cascaded attention block instead of SCANeXt.
+_base_: improved.yaml
+name: improved_cab
+
+model:
+  attention: cab
+  attention_reduction: 8

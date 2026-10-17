@@ -1,0 +1,7 @@
+# The notebook's exact recipe under a patient-grouped split. The gap against
+# notebook_best.yaml is the leakage contribution to the published Dice.
+_base_: notebook_best.yaml
+name: notebook_best_patient
+
+split:
+  mode: patient

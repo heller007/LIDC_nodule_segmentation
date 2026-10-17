@@ -1,0 +1,43 @@
+# Reproduces the winning notebook cell (test Dice 0.8826, IoU 0.7899) as
+# closely as the refactor allows, INCLUDING its slice-level split, so the new
+# code can be checked against a known number before anything is changed.
+_base_: base.yaml
+name: notebook_best
+
+data:
+  nodules: ["nodule-0"]   # notebook read only the first nodule
+
+split:
+  mode: slice             # leaky, on purpose -- this is the original protocol
+
+model:
+  attention: scanext
+  imagenet_preprocess: false   # notebook fed raw [0,1] to ImageNet weights
+  deep_supervision: true
+  aux_weight: 0.2
+  use_skips: false             # notebook wired skips into dec1/dec2 only
+
+loss:
+  name: tversky_focal
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  tversky_gamma: 0.75
+  per_image: false             # notebook pooled the whole batch
+
+train:
+  epochs: 200
+  batch_size: 4
+  lr: 5.0e-5
+  optimizer: adam
+  weight_decay: 0.0
+  clipnorm: 0
+  schedule: none
+  early_stopping_patience: 25
+  reduce_lr_patience: 10
+
+eval:
+  threshold_min: 0.25
+  threshold_max: 0.60
+  threshold_steps: 15
+  tta: false
+  bootstrap: 1000

@@ -1,0 +1,83 @@
+# Shared defaults. Every other config inherits from this via `_base_`.
+name: base
+out_dir: /kaggle/working/runs
+seed: 42
+
+data:
+  root: /kaggle/input/lidcidri
+  cache_dir: /kaggle/working/cache
+  img_size: 128
+  nodules: null          # null = every nodule-* dir; ["nodule-0"] = notebook behaviour
+  n_readers: 4
+  vote_threshold: 2
+  diffusion_iters: 5
+  diffusion_kappa: 50.0
+  diffusion_gamma: 0.1
+  drop_empty_masks: false
+  empty_mask_keep_frac: 1.0
+
+split:
+  mode: patient          # the leak-free protocol
+  val_frac: 0.15
+  test_frac: 0.15
+  seed: 42
+  folds: 1
+  fold: 0
+
+aug:
+  enabled: true
+  hflip: 0.5
+  vflip: 0.5
+  rot90: true
+  brightness: 0.5
+  brightness_range: 0.15
+  noise: 0.5
+  noise_sigma: 0.005
+  zoom: 0.5
+  zoom_min: 0.92
+
+model:
+  encoder: resnet50
+  attention: scanext
+  attention_reduction: 8
+  pretrained: true
+  imagenet_preprocess: true
+  deep_supervision: true
+  aux_weight: 0.2
+  dropout: 0.0
+  use_skips: true
+
+loss:
+  name: tversky_focal
+  tversky_alpha: 0.3
+  tversky_beta: 0.7
+  tversky_gamma: 0.75
+  per_image: true
+  smooth: 1.0e-6
+
+train:
+  epochs: 120
+  batch_size: 16
+  lr: 3.0e-4
+  optimizer: adamw
+  weight_decay: 1.0e-4
+  clipnorm: 1.0
+  schedule: cosine
+  warmup_epochs: 3
+  min_lr: 1.0e-7
+  freeze_encoder_epochs: 0
+  mixed_precision: true
+  early_stopping_patience: 25
+  reduce_lr_patience: 10
+  reduce_lr_factor: 0.5
+  monitor: val_dice
+
+eval:
+  tune_threshold: true
+  threshold_min: 0.10
+  threshold_max: 0.90
+  threshold_steps: 33
+  default_threshold: 0.5
+  tta: true
+  min_component_px: 0
+  bootstrap: 1000

@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Run outputs and caches -- never commit these.
+runs/
+cache/
+*.npy
+*.h5
+*.keras
+*.png
+!docs/*.png
+
+.venv/
+.vscode/
+.idea/
+.DS_Store

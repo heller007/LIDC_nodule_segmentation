@@ -1,0 +1,21 @@
+# Two-minute wiring check: tiny model budget, 2 epochs, no TTA.
+# Verifies the whole path end to end before committing GPU hours.
+_base_: base.yaml
+name: smoke
+
+data:
+  nodules: ["nodule-0"]
+
+train:
+  epochs: 2
+  batch_size: 8
+  warmup_epochs: 0
+  schedule: none
+  mixed_precision: false
+  early_stopping_patience: 100
+
+eval:
+  tune_threshold: true
+  threshold_steps: 5
+  tta: false
+  bootstrap: 0
