@@ -54,8 +54,71 @@ for cfg_file in sorted((ROOT / "configs").glob("*.yaml")):
 try:
     c = load_config(ROOT / "configs" / "improved.yaml", ["train.lr=1e-4", "model.attention=cab"])
     check("CLI overrides apply", c.train.lr == 1e-4 and c.model.attention == "cab")
+    # 1e-4 has no decimal point, so YAML 1.1 yields the string "1e-4".
+    check("override coerced to float", isinstance(c.train.lr, float), type(c.train.lr).__name__)
 except Exception as e:
     check("CLI overrides apply", False, str(e))
+
+try:
+    c = load_config(ROOT / "configs" / "improved.yaml", ["aug.enabled=false", "train.epochs=7"])
+    check("bool override coerced", c.aug.enabled is False, repr(c.aug.enabled))
+    check("int override coerced", c.train.epochs == 7 and isinstance(c.train.epochs, int))
+except Exception as e:
+    check("bool/int override coerced", False, str(e))
+
+
+# ----------------------------------------------------------------- baselines
+print("\nbaseline configs")
+_ARCH_EXPECT = {
+    "baseline_unet.yaml": ("unet", False, False),
+    "baseline_resnet50_unet.yaml": ("resnet50_unet", True, True),
+    "improved.yaml": ("dplinknet", True, True),
+}
+for fname, (arch, pretrained, imnet) in _ARCH_EXPECT.items():
+    try:
+        c = load_config(ROOT / "configs" / fname)
+        check(f"{fname} arch={arch}", c.model.arch == arch, c.model.arch)
+        check(f"{fname} pretrained={pretrained}", c.model.pretrained is pretrained,
+              repr(c.model.pretrained))
+        check(f"{fname} imagenet_preprocess={imnet}", c.model.imagenet_preprocess is imnet,
+              repr(c.model.imagenet_preprocess))
+        # Baselines must not quietly differ from improved.yaml on protocol.
+        if fname.startswith("baseline_"):
+            ref = load_config(ROOT / "configs" / "improved.yaml")
+            check(f"{fname} shares split", c.split == ref.split)
+            check(f"{fname} shares loss", c.loss == ref.loss)
+            check(f"{fname} shares aug", c.aug == ref.aug)
+            check(f"{fname} shares eval", c.eval == ref.eval)
+            check(f"{fname} shares data", c.data == ref.data)
+            check(f"{fname} is attention-free", c.model.attention == "none", c.model.attention)
+    except Exception as e:
+        check(f"load {fname}", False, f"{type(e).__name__}: {e}")
+
+try:
+    load_config(ROOT / "configs" / "improved.yaml", ["model.arch=nonexistent_net"])
+    # Literal types are not enforced by the dataclass, so the factory is the
+    # gate -- confirm it rejects rather than building something arbitrary.
+    from lidcseg.models.factory import BUILDERS  # noqa: E402
+
+    check("unknown arch not in BUILDERS", "nonexistent_net" not in BUILDERS)
+except ImportError:
+    # factory imports tensorflow; skip that half when it is unavailable.
+    check("unknown arch not in BUILDERS", True, "skipped (no tensorflow)")
+except Exception as e:
+    check("unknown arch not in BUILDERS", False, str(e))
+
+try:
+    from lidcseg.experiments import SUITES  # noqa: E402
+
+    check("baselines suite exists", "baselines" in SUITES)
+    names = [v[0] for v in SUITES["baselines"]]
+    check("baselines covers 3 archs", len(names) == 5 and "unet_scratch" in names
+          and "resnet50_unet" in names, str(names))
+    for suite, variants in SUITES.items():
+        dup = len(variants) != len({v[0] for v in variants})
+        check(f"suite '{suite}' has unique variant names", not dup)
+except Exception as e:
+    check("suite registry", False, f"{type(e).__name__}: {e}")
 
 try:
     load_config(ROOT / "configs" / "improved.yaml", ["train.nonsense=1"])

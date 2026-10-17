@@ -163,7 +163,8 @@ def run(cfg: Config) -> dict:
     from .data.pipeline import make_dataset, raw_eval_arrays
     from .data.splits import assert_no_leakage, make_split
     from .evaluate import format_results, full_evaluation
-    from .models.dplinknet import build_model, set_encoder_trainable
+    from .models.dplinknet import set_encoder_trainable
+    from .models.factory import build_model
 
     t0 = time.time()
     run_dir = cfg.run_dir
@@ -223,20 +224,28 @@ def run(cfg: Config) -> dict:
     print("\n[model] building")
     model = build_model(cfg.model, cfg.data.img_size)
     n_params = model.count_params()
-    print(f"[model] {model.name}  params={n_params:,}  outputs={cfg.model.deep_supervision and 2 or 1}")
+    print(f"[model] arch={cfg.model.arch}  {model.name}  params={n_params:,}  "
+          f"heads={2 if cfg.model.deep_supervision else 1}")
 
     callbacks, monitor, weights_path = build_callbacks(cfg, run_dir)
 
     history_all: dict[str, list] = {}
 
     # ---- optional frozen-encoder warmup ----
-    if cfg.train.freeze_encoder_epochs > 0:
+    # A from-scratch model (plain U-Net) has no pretrained stack, so there is
+    # nothing to protect and the phase is skipped rather than run empty.
+    has_encoder = bool(getattr(model, "encoder_layer_names", []))
+    warmup_epochs = cfg.train.freeze_encoder_epochs if has_encoder else 0
+    if cfg.train.freeze_encoder_epochs > 0 and not has_encoder:
+        print(f"\n[train] no pretrained encoder in arch={cfg.model.arch} -- "
+              "skipping the frozen warmup phase")
+
+    if warmup_epochs > 0:
         import tensorflow as tf
 
         n_frozen = set_encoder_trainable(model, False)
         compile_model(model, cfg, steps_per_epoch)
-        print(f"\n[train] phase 1: {n_frozen} encoder layers frozen, "
-              f"{cfg.train.freeze_encoder_epochs} epochs")
+        print(f"\n[train] phase 1: {n_frozen} encoder layers frozen, {warmup_epochs} epochs")
         # Warmup must not early-stop or checkpoint: the decoder is still random
         # and its val score says nothing about the final model. CSVLogger is
         # left out too, since phase 2 opens the same file in write mode.
@@ -255,7 +264,7 @@ def run(cfg: Config) -> dict:
         h = model.fit(
             train_ds,
             validation_data=val_ds,
-            epochs=cfg.train.freeze_encoder_epochs,
+            epochs=warmup_epochs,
             callbacks=warmup_cbs,
             verbose=1,
         )
@@ -269,7 +278,7 @@ def run(cfg: Config) -> dict:
         compile_model(model, cfg, steps_per_epoch)
 
     # ---- main training ----
-    remaining = max(cfg.train.epochs - cfg.train.freeze_encoder_epochs, 1)
+    remaining = max(cfg.train.epochs - warmup_epochs, 1)
     print(f"\n[train] {remaining} epochs, batch={cfg.train.batch_size}, "
           f"steps/epoch={steps_per_epoch}, monitor={monitor}")
 

@@ -44,6 +44,50 @@ regression. Two configs are provided to measure it directly:
 Run all three. `notebook_best` minus `notebook_best_patient` is the leakage.
 `improved` minus `notebook_best_patient` is the actual modelling gain.
 
+## Baselines
+
+Ablations compare the model against versions of itself, which cannot say
+whether the architecture was a good choice. Two external baselines run through
+the identical pipeline — same split, loss, augmentation, schedule and
+evaluation — so a difference is architectural:
+
+| config | arch | encoder | decoder | attention |
+|---|---|---|---|---|
+| `improved.yaml` | `dplinknet` | ResNet50 (ImageNet) | LinkNet: additive skips, 1x1 squeeze/expand | SCANeXt per stage |
+| `baseline_resnet50_unet.yaml` | `resnet50_unet` | ResNet50 (ImageNet) | U-Net: concat skips, two 3x3 convs | none |
+| `baseline_unet.yaml` | `unet` | none (random init) | U-Net | none |
+
+How to read the result:
+
+- **`improved` − `resnet50_unet`** — what the LinkNet decoder and the attention
+  blocks are worth, holding the encoder fixed. `--suite attention` then splits
+  that between the decoder and the attention itself.
+- **`resnet50_unet` − `unet`** — what the ImageNet encoder is worth.
+
+```bash
+python -m lidcseg.experiments --config configs/improved.yaml --suite baselines
+```
+
+The five-variant `baselines` suite runs all three architectures plus the two
+other attention settings and writes one leaderboard.
+
+**These models are not parameter-matched** — roughly 80M for DPLinkNet50, 60M
+for ResNet50-U-Net, 31M for U-Net at `base_filters: 64`. The leaderboard prints
+a params column for that reason. If DPLinkNet50 wins by a little, test whether
+capacity explains it before claiming the attention block does: raise
+`model.base_filters` on the U-Net, or compare against `--suite attention`'s
+`none` row, which is parameter-matched by construction.
+
+Two config notes, both deliberate:
+
+- `baseline_unet.yaml` sets `imagenet_preprocess: false` — there are no
+  pretrained weights expecting caffe-style inputs, so it trains on `[0,1]`.
+- It also sets `lr: 1.0e-3` against `3.0e-4` for the fine-tunes. A
+  from-scratch net needs a larger step; handing it a fine-tuning LR would
+  understate it and make the baseline a straw man.
+
+Inputs stay 3-channel for every architecture so one pipeline serves all three.
+
 ---
 
 ## What changed, and why
@@ -112,6 +156,8 @@ configs/                 experiment definitions (YAML, with _base_ inheritance)
   improved_cab.yaml        cascaded attention instead of SCANeXt
   improved_noattn.yaml     attention removed
   improved_cv5.yaml        5-fold grouped CV
+  baseline_unet.yaml           plain U-Net, random init
+  baseline_resnet50_unet.yaml  ResNet50 encoder + U-Net decoder, no attention
 src/lidcseg/
   config.py              dataclasses, YAML loading, dotted CLI overrides
   data/
@@ -122,7 +168,9 @@ src/lidcseg/
     pipeline.py            tf.data, per-epoch augmentation
   models/
     attention.py           SCANeXt and cascaded blocks (serializable)
-    dplinknet.py           encoder taps, decoder, model builder
+    dplinknet.py           DPLinkNet50: encoder taps, LinkNet decoder
+    unet.py                U-Net and ResNet50-U-Net baselines
+    factory.py             arch dispatch
   losses.py              focal Tversky, Dice+Focal, Dice+BCE
   metrics.py             numpy metrics (importable without TensorFlow)
   metrics_tf.py          streaming Keras metrics
@@ -131,7 +179,9 @@ src/lidcseg/
   train.py               entry point
   experiments.py         ablation suites + leaderboard
 notebooks/kaggle_train.ipynb
-tests/test_no_tf.py     54 checks, no GPU or TensorFlow needed
+tests/
+  test_no_tf.py          89 checks: splits, metrics, configs -- no TF needed
+  test_models_tf.py      builds every arch, forward/backward, needs TF
 ```
 
 ## Configuration
@@ -158,10 +208,10 @@ python -m lidcseg.experiments --config configs/improved.yaml --suite cv5
 python -m lidcseg.experiments --list          # show every suite
 ```
 
-Suites: `ablation` (11 variants, one change each), `attention`, `loss`,
-`leakage`, `cv5`. The leaderboard is rewritten after each variant, so an
-interrupted sweep keeps its results, and a variant that crashes does not lose
-the others.
+Suites: `ablation` (11 variants, one change each), `baselines` (5 -- the
+architecture comparison), `attention`, `loss`, `leakage`, `cv5`. The
+leaderboard is rewritten after each variant, so an interrupted sweep keeps its
+results, and a variant that crashes does not lose the others.
 
 ## Each run writes
 

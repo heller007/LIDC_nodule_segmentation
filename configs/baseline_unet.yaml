@@ -1,0 +1,27 @@
+# Baseline 1: textbook U-Net, random init.
+#
+# Same split, loss, schedule, augmentation and evaluation as improved.yaml, so
+# the difference against it is architecture plus the ImageNet encoder.
+#
+# imagenet_preprocess is off: there are no pretrained weights expecting
+# caffe-style inputs, so the net trains on [0,1] as usual. Inputs stay
+# 3-channel to keep one shared pipeline.
+_base_: improved.yaml
+name: baseline_unet
+
+model:
+  arch: unet
+  base_filters: 64
+  pretrained: false
+  imagenet_preprocess: false
+  attention: none
+  deep_supervision: true
+  aux_weight: 0.2
+  use_skips: true
+  dropout: 0.05
+
+train:
+  # No pretrained stack to protect, so no frozen phase. A from-scratch net
+  # also wants a larger LR than a fine-tune.
+  freeze_encoder_epochs: 0
+  lr: 1.0e-3

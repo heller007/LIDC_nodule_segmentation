@@ -1,0 +1,19 @@
+# Baseline 2: the same ResNet50 encoder as DPLinkNet50, plain U-Net decoder,
+# no attention.
+#
+# Differs from improved.yaml in exactly two ways -- decoder style (concat +
+# two 3x3 convs instead of additive + 1x1 squeeze/expand) and no attention
+# stage. Everything else is held constant, so improved minus this is what the
+# LinkNet decoder and the attention blocks are worth.
+_base_: improved.yaml
+name: baseline_resnet50_unet
+
+model:
+  arch: resnet50_unet
+  pretrained: true
+  imagenet_preprocess: true
+  attention: none
+  deep_supervision: true
+  aux_weight: 0.2
+  use_skips: true
+  dropout: 0.05

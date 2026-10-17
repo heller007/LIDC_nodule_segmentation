@@ -82,11 +82,24 @@ class AugConfig:
 
 @dataclass
 class ModelConfig:
+    # Architecture. The two baselines exist so the attention decoder can be
+    # compared against something, not just against its own ablations:
+    #   dplinknet      ResNet50 encoder + LinkNet decoder (additive skips,
+    #                  1x1 squeeze/expand) + an attention block per stage
+    #   resnet50_unet  same encoder, plain U-Net decoder (concat skips, two
+    #                  3x3 convs), no attention -- isolates the decoder and
+    #                  the attention block while holding the encoder fixed
+    #   unet           textbook U-Net trained from scratch -- isolates what
+    #                  the ImageNet encoder is worth
+    arch: Literal["dplinknet", "resnet50_unet", "unet"] = "dplinknet"
+
     encoder: Literal["resnet50"] = "resnet50"
-    # Attention block inserted at every decoder stage.
+    # Attention block inserted at every decoder stage. `resnet50_unet` and
+    # `unet` ignore this; they are deliberately attention-free baselines.
     attention: Literal["scanext", "cab", "none"] = "scanext"
     attention_reduction: int = 8
-    # ImageNet weights for the encoder.
+    # ImageNet weights for the encoder. Ignored by `unet`, which has no
+    # pretrained encoder to load.
     pretrained: bool = True
     # Caffe-style ImageNet preprocessing inside the graph. The notebook fed
     # raw [0,1] tensors to ImageNet weights, a train/pretrain mismatch.
@@ -97,6 +110,9 @@ class ModelConfig:
     dropout: float = 0.0
     # Which encoder taps feed decoder skips.
     use_skips: bool = True
+    # `unet` only: channel width of the first encoder stage; each stage
+    # doubles it. 64 is the width in the original U-Net paper.
+    base_filters: int = 64
 
 
 @dataclass

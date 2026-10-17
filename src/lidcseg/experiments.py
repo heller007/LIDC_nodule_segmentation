@@ -46,6 +46,32 @@ SUITES: dict[str, list[tuple[str, dict]]] = {
         ("cab", {"model.attention": "cab"}),
         ("none", {"model.attention": "none"}),
     ],
+    # Architecture comparison against external baselines, all under the same
+    # split, loss, schedule and evaluation. This is the suite that says whether
+    # the attention decoder earns its keep; `ablation` only compares the model
+    # against versions of itself.
+    #
+    # Reading it: dplinknet_scanext - resnet50_unet isolates the LinkNet
+    # decoder plus attention; resnet50_unet - unet isolates the ImageNet
+    # encoder. The params column matters here, since the baselines are not
+    # parameter-matched.
+    "baselines": [
+        ("dplinknet_scanext", {"model.arch": "dplinknet", "model.attention": "scanext"}),
+        ("dplinknet_cab", {"model.arch": "dplinknet", "model.attention": "cab"}),
+        ("dplinknet_noattn", {"model.arch": "dplinknet", "model.attention": "none"}),
+        ("resnet50_unet", {"model.arch": "resnet50_unet", "model.attention": "none"}),
+        (
+            "unet_scratch",
+            {
+                "model.arch": "unet",
+                "model.attention": "none",
+                "model.pretrained": False,
+                "model.imagenet_preprocess": False,
+                "train.freeze_encoder_epochs": 0,
+                "train.lr": 1.0e-3,
+            },
+        ),
+    ],
     "loss": [
         ("tversky_g075", {"loss.name": "tversky_focal", "loss.tversky_gamma": 0.75}),
         ("tversky_g150", {"loss.name": "tversky_focal", "loss.tversky_gamma": 1.5}),
@@ -98,6 +124,8 @@ def run_suite(base: Config, suite: str, only: list[str] | None = None) -> list[d
             test = meta["results"]["test"]
             rows.append({
                 "variant": suffix,
+                "arch": cfg.model.arch,
+                "attention": cfg.model.attention,
                 "overrides": overrides,
                 "dice": test.get("dice"),
                 "dice_ci": test.get("dice_ci"),
@@ -115,6 +143,8 @@ def run_suite(base: Config, suite: str, only: list[str] | None = None) -> list[d
             traceback.print_exc()
             rows.append({
                 "variant": suffix,
+                "arch": cfg.model.arch,
+                "attention": cfg.model.attention,
                 "overrides": overrides,
                 "status": "failed",
                 "error": f"{type(e).__name__}: {e}",
@@ -140,15 +170,25 @@ def _write_leaderboard(base: Config, suite: str, rows: list[dict]) -> None:
         "",
         f"Split: **{base.split.mode}-level**. Dice is per-image mean with a 95% "
         "bootstrap CI; `dice_global` pools all pixels.",
+        ""
+        + (
+            "These architectures are **not parameter-matched** -- read the "
+            "params column alongside the scores."
+            if suite == "baselines"
+            else ""
+        ),
         "",
-        "| variant | Dice | 95% CI | IoU | Dice(global) | Prec | Rec | thr | params | min |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| variant | arch | Dice | 95% CI | IoU | Dice(global) | Prec | Rec | thr | params | min |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in ok:
         ci = r.get("dice_ci")
         ci_s = f"{ci[0]:.3f}-{ci[1]:.3f}" if ci else "--"
+        arch = r.get("arch", "?")
+        att = r.get("attention", "none")
+        arch_s = f"{arch}+{att}" if arch == "dplinknet" and att != "none" else arch
         lines.append(
-            f"| `{r['variant']}` | **{r['dice']:.4f}** | {ci_s} | {r['iou']:.4f} | "
+            f"| `{r['variant']}` | {arch_s} | **{r['dice']:.4f}** | {ci_s} | {r['iou']:.4f} | "
             f"{r['dice_global']:.4f} | {r['precision']:.3f} | {r['recall']:.3f} | "
             f"{r['threshold']:.2f} | {r['params'] / 1e6:.1f}M | {r['minutes']:.0f} |"
         )

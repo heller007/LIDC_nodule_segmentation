@@ -94,8 +94,8 @@ def decoder_block(
     return x
 
 
-def build_model(cfg: ModelConfig, img_size: int = 128) -> keras.Model:
-    """Assemble the network described by `cfg`."""
+def build_dplinknet(cfg: ModelConfig, img_size: int = 128) -> keras.Model:
+    """Assemble DPLinkNet50 as described by `cfg`."""
     if cfg.encoder != "resnet50":
         raise ValueError(f"only resnet50 is wired up, got {cfg.encoder!r}")
     if img_size % 32 != 0:
@@ -152,9 +152,12 @@ def set_encoder_trainable(model: keras.Model, trainable: bool) -> int:
     Used for the warmup phase: train the fresh decoder first against frozen
     ImageNet features, then fine-tune everything.
     """
-    names = set(getattr(model, "encoder_layer_names", []))
+    if not hasattr(model, "encoder_layer_names"):
+        raise RuntimeError("model was not built by this package; encoder names unknown")
+    names = set(model.encoder_layer_names)
     if not names:
-        raise RuntimeError("model was not built by build_model(); encoder names unknown")
+        # A from-scratch model (plain U-Net) has no pretrained stack to freeze.
+        return 0
     n = 0
     for layer in model.layers:
         if layer.name in names:
