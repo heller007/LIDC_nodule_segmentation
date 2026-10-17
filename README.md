@@ -1,9 +1,14 @@
 # LIDC-IDRI Nodule Segmentation — DPLinkNet50 with Attention Decoders
 
-Lung-nodule segmentation on the LIDC-IDRI slice dataset. A ResNet50 encoder
-feeds a LinkNet-style decoder whose every stage carries an attention block
-(SCANeXt dual-attention or a 3-gate cascaded block), trained with focal Tversky
-loss and deep supervision.
+Lung-nodule segmentation on the LIDC-IDRI slice dataset (Kaggle
+`zhangweiled/lidcidri`: 875 patients, 5,808 slices with `nodule-0` only, four
+radiologist masks per slice). A ResNet50 encoder feeds a LinkNet-style decoder
+whose every stage carries an attention block (SCANeXt dual-attention or a
+3-gate cascaded block), trained with focal Tversky loss and deep supervision.
+
+**[docs/RESEARCH_NOTES.md](docs/RESEARCH_NOTES.md)** covers the dataset's
+properties, the open problems, and the research plan. Read it before
+interpreting any number here.
 
 Refactored from an exploratory notebook into a configurable, reproducible
 pipeline. One command trains; one command runs an ablation suite.
@@ -25,9 +30,13 @@ split the data with `train_test_split` over the flat array of slices.
 
 Neighbouring CT slices through one nodule are near-identical images. A
 slice-level split therefore puts copies of the same nodule in train and in
-test, and the test score partly measures memorisation. The dataset has ~5,800
-slices across a few hundred patients — roughly 10-20 slices per nodule — so
-almost every test slice had near-twins in training.
+test, and the test score partly measures memorisation.
+
+The dataset has 5,808 slices across 875 patients — **6.64 slices per patient**.
+Under a 70/15/15 random slice split, a test slice whose patient has n slices
+has a `1 − 0.30^(n−1)` chance that at least one slice of the same patient
+landed in training: 0.91 at n=3, 0.99 at n=5, **0.999 at n=7**. At the measured
+mean, essentially every test slice had a near-duplicate of itself in training.
 
 This repo splits by **patient** (`split.mode: patient`), verified by an
 assertion that fails the run if any patient appears in two sets.
@@ -71,12 +80,12 @@ python -m lidcseg.experiments --config configs/improved.yaml --suite baselines
 The five-variant `baselines` suite runs all three architectures plus the two
 other attention settings and writes one leaderboard.
 
-**These models are not parameter-matched** — roughly 80M for DPLinkNet50, 60M
-for ResNet50-U-Net, 31M for U-Net at `base_filters: 64`. The leaderboard prints
-a params column for that reason. If DPLinkNet50 wins by a little, test whether
-capacity explains it before claiming the attention block does: raise
-`model.base_filters` on the U-Net, or compare against `--suite attention`'s
-`none` row, which is parameter-matched by construction.
+**These models are not parameter-matched.** DPLinkNet50 + SCANeXt measured
+111.1M parameters in the original notebook; the two baselines are smaller, and
+the leaderboard prints the exact count per run. If DPLinkNet50 wins by a
+little, test whether capacity explains it before crediting the attention
+block: raise `model.base_filters` on the U-Net, or compare against
+`--suite attention`'s `none` row, which is parameter-matched by construction.
 
 Two config notes, both deliberate:
 
@@ -178,6 +187,7 @@ src/lidcseg/
   report.py              curves, metric bars, qualitative panels
   train.py               entry point
   experiments.py         ablation suites + leaderboard
+docs/RESEARCH_NOTES.md   dataset properties, problems, research plan
 notebooks/kaggle_train.ipynb
 tests/
   test_no_tf.py          89 checks: splits, metrics, configs -- no TF needed
