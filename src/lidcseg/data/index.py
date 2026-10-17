@@ -52,11 +52,15 @@ def is_patient_dir(p: Path) -> bool:
 def find_dataset_root(root: str | Path) -> Path:
     """Resolve the directory that directly contains LIDC-IDRI-* folders.
 
-    Kaggle mounts vary (`/kaggle/input/lidcidri`, with or without a nested
-    `LIDC-IDRI-slices/`), and kagglehub downloads elsewhere again. Rather than
-    hard-coding one path -- the notebook pointed at
-    `/kaggle/input/datasets/zhangweiled/lidcidri/LIDC-IDRI-slices/`, which does
-    not exist on a standard Kaggle mount -- search a couple of levels down.
+    Kaggle mount paths vary. `kagglehub.dataset_download` mounts under
+    `/kaggle/input/datasets/<owner>/<slug>/`, which is what the original
+    notebook hard-coded and it was correct for that setup. Adding the same
+    dataset through the Add Data panel instead gives `/kaggle/input/<slug>/`,
+    and either may or may not nest a `LIDC-IDRI-slices/` directory.
+
+    So rather than hard-code any of them, search a few levels down for
+    directories matching `LIDC-IDRI-<number>`. This is about portability
+    across mount styles, not about the old path being broken.
     """
     root = Path(root)
     if not root.exists():

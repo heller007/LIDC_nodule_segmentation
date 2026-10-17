@@ -18,7 +18,10 @@ python -m lidcseg.train --config configs/improved.yaml
 python -m lidcseg.experiments --config configs/improved.yaml --suite ablation
 ```
 
-On Kaggle, open [`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb)
+On Kaggle, open [`build/make_standalone.py     generator for the offline single-file notebook
+notebooks/
+  kaggle_train.ipynb             full pipeline (needs internet)
+  kaggle_profile_standalone.ipynb   profiler only, fully offline`](notebooks/kaggle_train.ipynb)
 and run it top to bottom.
 
 ---
@@ -115,7 +118,7 @@ Inputs stay 3-channel for every architecture so one pipeline serves all three.
 | # | Change | Rationale |
 |---|---|---|
 | 5 | **All nodules per patient** | The notebook read only `nodule-0` and silently dropped nodules 1..N of every multi-nodule patient. The notebook prints how much data this recovers. |
-| 6 | **Dataset root auto-discovery** | The hard-coded `/kaggle/input/datasets/zhangweiled/lidcidri/LIDC-IDRI-slices/` does not exist on a standard Kaggle mount, and `kagglehub.dataset_download` returns a different path again. Now resolved by searching for `LIDC-IDRI-<number>` directories. |
+| 6 | **Dataset root auto-discovery** | Mount paths differ: `kagglehub.dataset_download` gives `/kaggle/input/datasets/<owner>/<slug>/` (what the notebook hard-coded, and correct for that setup), while the Add Data panel gives `/kaggle/input/<slug>/`. Now resolved by searching for `LIDC-IDRI-<number>` directories, so either works. |
 | 7 | **Binarise masks before resize** | Resizing a 0-255 mask bilinearly and thresholding after invents labels along nodule boundaries. Now: threshold, then nearest-neighbour resize. |
 | 8 | **Diffusion before resize, no wrap-around** | Denoising after downsampling works on already-mixed pixels. The old `np.roll` gradients also wrapped the top row into the bottom; now edges replicate. `gamma` is checked against the 0.25 stability bound. |
 | 9 | **`.npy` memmap cache** | Preprocessing ~6k slices took minutes on every run and held the whole float32 stack in RAM twice. Now paid once, keyed by a hash of every preprocessing parameter, then memmapped. |
@@ -161,6 +164,13 @@ Before training anything, measure what you are training on:
 python -m lidcseg.profile_data --config configs/improved.yaml
 python -m lidcseg.profile_data --config configs/improved.yaml --max-slices 1500
 ```
+
+**No internet or GPU available?** `notebooks/kaggle_profile_standalone.ipynb`
+is a single self-contained notebook with the profiler inlined -- no clone, no
+code dataset, nothing to install. Regenerate it with
+`python build/make_standalone.py` after changing `profile_data.py` or
+`data/index.py`; the generated file is verified to produce output identical to
+the package version.
 
 Minutes, no GPU, no TensorFlow. Reads masks at **native** resolution — the
 training cache has already resized, so it cannot answer these — and writes
