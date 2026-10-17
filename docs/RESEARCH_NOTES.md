@@ -57,24 +57,39 @@ One directory per patient, then per nodule, then parallel `images/` and four
 | Model size | 111.1M params (SCANeXt), 123.8M (cascaded) | Keras summary |
 | Pixel accuracy at convergence | ~0.998 | every cell |
 
-### Unverified — check on the first indexing run
+### Unverified — run the profiler
 
-These are printed by `lidcseg`'s index step and the cache builder; none has
-been measured yet.
+```bash
+python -m lidcseg.profile_data --config configs/improved.yaml
+```
 
-- **Slice count with all nodules included.** The notebook read only
-  `nodule-0`, so every additional nodule of a multi-nodule patient was
-  discarded. Upstream LIDC averages >1 nodule per positive case, so the real
-  total is plausibly well above 5,808 — but the number is unknown.
-- **Positive pixel fraction.** Implied to be tiny by the 0.998 accuracy, never
-  printed. Determines how severe the imbalance actually is.
-- **Fraction of slices with an empty merged mask** under vote ≥2.
-- **Mask-count histogram** — how many slices have 4 reader masks present, how
-  many have fewer. Slices with <2 reader masks on disk *cannot* be positive
-  under a ≥2 vote and are silently all-background.
-- **Native resolution before the 128×128 resize.**
-- **Nodule size distribution in pixels** — needed to say anything about
-  small-nodule performance.
+Measures all of the following and writes `profile.json`, `profile.md` (tables
+ready to paste into this section) and figures. Masks are read at **native**
+resolution, which the training cache cannot do because it has already resized.
+Pure numpy/OpenCV, no TensorFlow, a few minutes over the full set, with
+`--max-slices` for a strided sample.
+
+| # | Quantity | Why it matters |
+|---|---|---|
+| 1 | Positive pixel fraction, per vote threshold | How severe the imbalance is; implied tiny by the 0.998 accuracy but never printed |
+| 2 | Empty-merged-mask fraction, per vote threshold | Sets the negative-sample budget |
+| 3 | Reader-mask histogram | Slices with <2 masks on disk *cannot* be positive under a ≥2 vote — they are silently all-background and poison the negative class |
+| 4 | Native resolution | Needed before any claim about what the 128×128 resize costs |
+| 5 | Nodule size distribution, native **and** post-resize | The size-stratified metrics in §6.4 need these bins; the post-resize half directly tests §2.2 |
+| 6 | Slice/patient/nodule counts, all nodules vs `nodule-0` | How much data P5 discarded |
+| 7 | **Inter-reader pairwise Dice** | An approximate *ceiling* on achievable Dice — see below |
+
+Item 7 was not on the original list and is arguably the most consequential.
+The four radiologists disagree with each other by some amount; their mean
+pairwise Dice is roughly the best a model can be expected to score against a
+merged target. Published LIDC inter-reader agreement sits around 0.7–0.85
+depending on the fusion rule.
+
+If that number comes back near 0.85 while the notebook reported 0.8826 on a
+leaky split, the model was scoring **at or above the agreement between the
+experts who made the labels** — which would mean it was fitting the vote-≥2
+fusion rule rather than the anatomy. That single comparison would recast the
+whole result, and it costs one profiler run.
 
 ---
 
@@ -119,6 +134,10 @@ binary target is a modelling decision, not preprocessing:
 The disagreement itself is signal: pixels where 2 of 4 readers marked nodule
 are genuinely ambiguous, and training against a hard label there asks the model
 to be confident where experts were not. Currently discarded.
+
+The profiler quantifies this (`inter_reader_agreement`): mean pairwise Dice
+between readers, which bounds what any model can score against a fused target.
+Compare it against the model's Dice before claiming the model is good.
 
 ### 2.4 2D slices of a 3D structure
 
@@ -273,7 +292,9 @@ threshold-placement effect as much as a model effect, and the best cell's
 chosen threshold (0.575) sat at the edge of its own search window [0.25, 0.60],
 so the true optimum may have been outside it.
 
-**The first job is re-measuring all of this under the patient split.**
+**The first job is re-measuring all of this under the patient split** — and
+before that, one profiler run, because the inter-reader Dice determines whether
+these numbers were ever physically meaningful.
 
 ---
 
@@ -314,6 +335,10 @@ Implemented in `lidcseg` (see the repo README for the full 25-item list).
 - 8-way dihedral TTA averaged in probability space
 - small-component removal
 
+**Measurement**
+- `lidcseg.profile_data` — native-resolution dataset profiler covering all
+  seven quantities above, with a paste-ready markdown report
+
 **Reproducibility**
 - every run writes its fully resolved config, split summary, index, history,
   results and figures
@@ -328,6 +353,9 @@ not modelling — on current evidence (P8) the measurement is the bottleneck.
 
 ### Near term
 
+0. **Profile the dataset.** `python -m lidcseg.profile_data`. Minutes, no GPU,
+   and it fills §1's table — including the inter-reader Dice ceiling, which
+   determines whether any of the existing numbers were meaningful.
 1. **Re-baseline everything under the patient split.** Run
    `notebook_best` → `notebook_best_patient` → `improved`. This produces the
    one number the thesis most needs: how much of the published 0.8826 was
@@ -416,3 +444,4 @@ Fixed so that results stay comparable as the work continues.
 - How many slices does including all nodules actually add?
 - What fraction of slices have fewer than 2 reader masks, and are they
   silently poisoning the negative class?
+- What is the inter-reader Dice, and did the reported 0.8826 exceed it?

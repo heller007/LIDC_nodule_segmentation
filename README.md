@@ -153,6 +153,35 @@ Inputs stay 3-channel for every architecture so one pipeline serves all three.
 
 ---
 
+## Profiling the dataset
+
+Before training anything, measure what you are training on:
+
+```bash
+python -m lidcseg.profile_data --config configs/improved.yaml
+python -m lidcseg.profile_data --config configs/improved.yaml --max-slices 1500
+```
+
+Minutes, no GPU, no TensorFlow. Reads masks at **native** resolution — the
+training cache has already resized, so it cannot answer these — and writes
+`profile.json`, `profile.md` (paste-ready tables) and `profile.png` to
+`<out_dir>/profile/`:
+
+- positive pixel fraction and background:foreground ratio, **per vote threshold**
+- empty-merged-mask fraction, per vote threshold
+- reader-mask histogram, flagging slices with fewer masks than the vote needs
+  (those cannot be positive by construction)
+- native resolution, and whether it is uniform
+- nodule size distribution native **and** after the training resize, plus a
+  survival table: how many components fall below 1/4/9/16/25 px
+- slice, patient and nodule counts with all nodules vs `nodule-0` only
+- **inter-reader pairwise Dice** — roughly the ceiling on achievable Dice,
+  since a model cannot meaningfully beat the agreement between the
+  radiologists who drew the labels
+
+That last one is worth running before trusting any score.
+[docs/RESEARCH_NOTES.md](docs/RESEARCH_NOTES.md) explains why.
+
 ## Layout
 
 ```
@@ -184,6 +213,7 @@ src/lidcseg/
   metrics.py             numpy metrics (importable without TensorFlow)
   metrics_tf.py          streaming Keras metrics
   evaluate.py            TTA, threshold tuning, bootstrap CIs
+  profile_data.py        dataset profiler (native-resolution statistics)
   report.py              curves, metric bars, qualitative panels
   train.py               entry point
   experiments.py         ablation suites + leaderboard
@@ -191,6 +221,7 @@ docs/RESEARCH_NOTES.md   dataset properties, problems, research plan
 notebooks/kaggle_train.ipynb
 tests/
   test_no_tf.py          89 checks: splits, metrics, configs -- no TF needed
+  test_profile.py        51 checks: profiler against a synthetic tree, no TF
   test_models_tf.py      builds every arch, forward/backward, needs TF
 ```
 
@@ -254,7 +285,13 @@ Kaggle's GPU image already has everything. Locally:
 
 ```bash
 pip install -r requirements.txt
+pip install -e .          # or put src/ on PYTHONPATH
 ```
+
+The package lives under `src/`, so `python -m lidcseg.train` needs either an
+editable install or `PYTHONPATH=src`. The Kaggle notebook sets `PYTHONPATH`
+itself — and asserts a subprocess can import the package before running
+anything long, since `sys.path` set in a kernel does not reach `!python`.
 
 TensorFlow 2.15+ (Keras 3 supported), numpy, opencv, scikit-learn, pyyaml,
 matplotlib.
@@ -263,6 +300,9 @@ matplotlib.
 
 ## Suggested order of work
 
+0. `python -m lidcseg.profile_data` — measure the dataset before modelling it.
+   Minutes, no GPU, and the inter-reader Dice it reports tells you what score
+   is even achievable.
 1. `configs/smoke.yaml` — confirm the path end to end (~3 min).
 2. `notebook_best.yaml` — confirm the refactor reproduces ~0.88 global Dice
    under the old protocol. If it does not, the refactor changed the model and

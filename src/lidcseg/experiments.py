@@ -204,13 +204,16 @@ def _write_leaderboard(base: Config, suite: str, rows: list[dict]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Run an ablation suite")
-    ap.add_argument("--config", required=True)
-    ap.add_argument("--suite", required=True, choices=sorted(SUITES))
+    # Not `required` at the argparse level: --list is a standalone query and
+    # should not demand a config it never reads.
+    ap.add_argument("--config")
+    ap.add_argument("--suite", choices=sorted(SUITES))
     ap.add_argument("--set", dest="overrides", nargs="*", default=[], metavar="KEY=VALUE",
                     help="overrides applied to the base config before the suite")
     ap.add_argument("--only", nargs="*", default=None,
                     help="run just these variant names")
-    ap.add_argument("--list", action="store_true", help="print the suite and exit")
+    ap.add_argument("--list", action="store_true",
+                    help="print every suite and its variants, then exit")
     args = ap.parse_args(argv)
 
     if args.list:
@@ -219,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
             for suffix, ov in variants:
                 print(f"  {suffix:<22} {json.dumps(ov, default=str)}")
         return 0
+
+    missing = [f"--{n}" for n in ("config", "suite") if getattr(args, n) is None]
+    if missing:
+        ap.error(f"{' and '.join(missing)} required (or pass --list on its own)")
 
     base = load_config(args.config, args.overrides)
     rows = run_suite(base, args.suite, args.only)
