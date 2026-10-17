@@ -1,0 +1,218 @@
+{
+  "root": "data/lidcidri.zip",
+  "source": "zip",
+  "generated": "2026-10-17 10:35:09",
+  "config": "improved",
+  "slices_profiled": 15548,
+  "sampled": false,
+  "workers": 16,
+  "failures": [],
+  "n_failures": 0,
+  "counts": {
+    "all_nodules": {
+      "slices": 15548,
+      "patients": 875,
+      "nodules": 2630,
+      "slices_per_patient": 17.77,
+      "mask_count_histogram": {
+        "4": 15548
+      }
+    },
+    "nodule_0_only": {
+      "slices": 5808,
+      "patients": 875,
+      "nodules": 875,
+      "slices_per_patient": 6.64,
+      "mask_count_histogram": {
+        "4": 5808
+      }
+    }
+  },
+  "measurements": {
+    "resolution": {
+      "distinct_shapes": 1,
+      "shapes": [
+        {
+          "h": 128,
+          "w": 128,
+          "slices": 15548
+        }
+      ],
+      "uniform": true
+    },
+    "reader_masks": {
+      "histogram": {
+        "4": 15548
+      },
+      "fraction_with_all_readers": 1.0,
+      "slices_below_vote_threshold": 0,
+      "fraction_below_vote_threshold": 0.0
+    },
+    "vote_sensitivity": [
+      {
+        "vote_threshold": 1,
+        "positive_pixel_fraction": 0.00946788,
+        "positive_pixels": 2411834,
+        "empty_slices": 62,
+        "empty_slice_fraction": 0.004,
+        "imbalance_ratio": 104.6
+      },
+      {
+        "vote_threshold": 2,
+        "positive_pixel_fraction": 0.00584203,
+        "positive_pixels": 1488189,
+        "empty_slices": 4988,
+        "empty_slice_fraction": 0.3208,
+        "imbalance_ratio": 170.2
+      },
+      {
+        "vote_threshold": 3,
+        "positive_pixel_fraction": 0.00387487,
+        "positive_pixels": 987078,
+        "empty_slices": 8028,
+        "empty_slice_fraction": 0.5163,
+        "imbalance_ratio": 257.1
+      },
+      {
+        "vote_threshold": 4,
+        "positive_pixel_fraction": 0.00226445,
+        "positive_pixels": 576842,
+        "empty_slices": 10847,
+        "empty_slice_fraction": 0.6976,
+        "imbalance_ratio": 440.6
+      }
+    ],
+    "configured_vote_threshold": 2,
+    "train_img_size": 128,
+    "sizes": {
+      "native_component_area_px": {
+        "n": 10800,
+        "mean": 137.7953,
+        "std": 188.2636,
+        "min": 1.0,
+        "max": 1754.0,
+        "p5": 8.0,
+        "p25": 27.0,
+        "p50": 60.0,
+        "p75": 167.0,
+        "p95": 541.05
+      },
+      "resized_component_area_px": {
+        "n": 10800,
+        "mean": 137.7953,
+        "std": 188.2636,
+        "min": 1.0,
+        "max": 1754.0,
+        "p5": 8.0,
+        "p25": 27.0,
+        "p50": 60.0,
+        "p75": 167.0,
+        "p95": 541.05
+      },
+      "native_equiv_diameter_px": {
+        "n": 10800,
+        "mean": 11.0768,
+        "std": 7.263,
+        "min": 1.1284,
+        "max": 47.2574,
+        "p5": 3.192,
+        "p25": 5.863,
+        "p50": 8.74,
+        "p75": 14.582,
+        "p95": 26.247
+      },
+      "resized_equiv_diameter_px": {
+        "n": 10800,
+        "mean": 11.0768,
+        "std": 7.263,
+        "min": 1.1284,
+        "max": 47.2574,
+        "p5": 3.192,
+        "p25": 5.863,
+        "p50": 8.74,
+        "p75": 14.582,
+        "p95": 26.247
+      },
+      "diameter_histogram_native": {
+        "<4": 1004,
+        "4-8": 3804,
+        "8-16": 3684,
+        "16-32": 2136,
+        "32-64": 172,
+        ">=64": 0
+      },
+      "diameter_histogram_resized": {
+        "<4": 1004,
+        "4-8": 3804,
+        "8-16": 3684,
+        "16-32": 2136,
+        "32-64": 172,
+        ">=64": 0
+      },
+      "components_total_native": 10800,
+      "components_total_resized": 10800,
+      "resize_survival": [
+        {
+          "min_area_px": 1,
+          "components_native": 10800,
+          "components_resized": 10800,
+          "retained_fraction": 1.0
+        },
+        {
+          "min_area_px": 4,
+          "components_native": 10574,
+          "components_resized": 10574,
+          "retained_fraction": 1.0
+        },
+        {
+          "min_area_px": 9,
+          "components_native": 10210,
+          "components_resized": 10210,
+          "retained_fraction": 1.0
+        },
+        {
+          "min_area_px": 16,
+          "components_native": 9472,
+          "components_resized": 9472,
+          "retained_fraction": 1.0
+        },
+        {
+          "min_area_px": 25,
+          "components_native": 8449,
+          "components_resized": 8449,
+          "retained_fraction": 1.0
+        }
+      ],
+      "slices_losing_all_foreground_on_resize": 0,
+      "fraction_losing_all_foreground": 0.0,
+      "components_per_nonempty_slice": 1.023
+    },
+    "inter_reader_agreement": {
+      "n": 15548,
+      "mean": 0.5274,
+      "std": 0.2108,
+      "min": 0.0269,
+      "max": 1.0,
+      "p5": 0.259,
+      "p25": 0.35,
+      "p50": 0.5,
+      "p75": 0.725,
+      "p95": 0.897,
+      "note": "mean pairwise Dice between radiologists -- raw annotator agreement, NOT the ceiling for a model predicting a fused target"
+    },
+    "consensus_ceiling": {
+      "n": 15548,
+      "mean": 0.5924,
+      "std": 0.3169,
+      "min": 0.0,
+      "max": 1.0,
+      "p5": 0.0,
+      "p25": 0.506,
+      "p50": 0.75,
+      "p75": 0.766,
+      "p95": 0.917,
+      "note": "each reader vs the majority consensus of the others -- the correct ceiling for a model trained on the fused mask, since predicting a consensus is easier than predicting an individual"
+    }
+  },
+  "minutes": 1.05
+}

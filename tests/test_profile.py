@@ -22,7 +22,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from lidcseg.config import load_config  # noqa: E402
-from lidcseg.profile_data import SIZE_BIN_LABELS, aggregate, profile_slice, run  # noqa: E402
+from lidcseg.data.zip_source import ZipSource  # noqa: E402
+from lidcseg.profile_data import (  # noqa: E402
+    SIZE_BIN_LABELS,
+    _pairwise_dice,
+    _reader_vs_consensus_dice,
+    aggregate,
+    profile_slice,
+    run,
+)
 from lidcseg.data.index import build_index  # noqa: E402
 
 PASS, FAIL = [], []
@@ -207,6 +215,71 @@ try:
           abs(dp.mean_pairwise_dice - 1 / 3) < 1e-6, str(dp.mean_pairwise_dice))
     check("vote>=2 keeps both discs", len(dp.component_areas) == 2, str(dp.component_areas))
     check("vote>=3 drops both", dp.vote_px[3] == 0, str(dp.vote_px))
+
+    # ------------------------------------------- consensus ceiling metric
+    print()
+    print("consensus ceiling")
+    A = (disc(32, 8, 8, 5) > 0).astype(np.uint8)
+    B = (disc(32, 24, 24, 5) > 0).astype(np.uint8)
+
+    check("identical readers -> consensus Dice 1.0",
+          abs(_reader_vs_consensus_dice([A, A, A, A], 2) - 1.0) < 1e-9,
+          str(_reader_vs_consensus_dice([A, A, A, A], 2)))
+
+    # Two readers on A, two on B: for any held-out reader the other three
+    # carry 2 votes for the opposite disc, so the consensus is always the one
+    # that reader did NOT draw -> Dice 0 every time.
+    loo = _reader_vs_consensus_dice([A, A, B, B], 2)
+    check("split panel -> consensus Dice 0.0", abs(loo) < 1e-9, str(loo))
+    pw = _pairwise_dice([A, A, B, B])
+    check("split panel -> pairwise Dice 1/3", abs(pw - 1 / 3) < 1e-6, str(pw))
+    # The point of having both: they answer different questions.
+    check("the two agreement metrics differ", abs(pw - loo) > 0.3, f"{pw} vs {loo}")
+
+    # 3 of 4 agree: the dissenter scores 0, the other three score 1 -> 0.75.
+    loo3 = _reader_vs_consensus_dice([A, A, A, B], 2)
+    check("3-of-4 panel -> consensus Dice 0.75", abs(loo3 - 0.75) < 1e-9, str(loo3))
+    check("fewer than 3 readers -> None", _reader_vs_consensus_dice([A, B], 2) is None)
+
+    pcc = profile_slice(by_name["0.png"][0], 128, 2, 4)
+    check("profile carries consensus dice",
+          pcc.reader_vs_consensus_dice is not None
+          and abs(pcc.reader_vs_consensus_dice - 1.0) < 1e-9,
+          str(pcc.reader_vs_consensus_dice))
+    check("aggregate exposes consensus_ceiling",
+          agg["consensus_ceiling"]["n"] == 16,
+          str(agg.get("consensus_ceiling", {}).get("n")))
+
+    # ------------------------------------------------------- zip source
+    print()
+    print("zip source")
+    import zipfile
+
+    zpath = tmp / "ds.zip"
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in sorted(data_root.rglob("*.png")):
+            z.write(f, f.relative_to(data_root.parent).as_posix())
+
+    zs = ZipSource(zpath)
+    zrecs = zs.build_index(None, 4)
+    check("zip index finds the same 16 slices", len(zrecs) == len(recs),
+          f"{len(zrecs)} vs {len(recs)}")
+    check("zip index has the same uids",
+          sorted(r.uid for r in zrecs) == sorted(r.uid for r in recs))
+    check("zip nodules filter works", len(zs.build_index(["nodule-0"], 4)) == 12,
+          str(len(zs.build_index(["nodule-0"], 4))))
+
+    # Decoded arrays must match the filesystem path exactly, or every metric
+    # would silently differ depending on how the data was read.
+    zp = profile_slice(zrecs[0], 128, 2, 4, source=zs)
+    fp = profile_slice(next(r for r in recs if r.uid == zrecs[0].uid), 128, 2, 4)
+    check("zip profile == filesystem profile", zp == fp)
+
+    zagg = aggregate([profile_slice(r, 128, 2, 4, source=zs) for r in zrecs], cfg, 4)
+    check("zip aggregate == filesystem aggregate", zagg == agg)
+    check("imread_gray returns None for a missing member",
+          zs.imread_gray("nope/missing.png") is None)
+    zs.close()
 
     # ----------------------------------------------------- end to end
     print("\nend-to-end run")

@@ -70,23 +70,50 @@ class SliceProfile:
     resized_component_areas: tuple[int, ...]
     # Mean pairwise Dice between readers; None when fewer than 2 masks exist.
     mean_pairwise_dice: float | None
+    # Each reader vs the others' majority consensus; None with fewer than 3.
+    reader_vs_consensus_dice: float | None
+
+
+def _dice(a: np.ndarray, b: np.ndarray) -> float:
+    """Dice between two boolean masks; both-empty counts as perfect."""
+    a, b = a.astype(bool), b.astype(bool)
+    denom = a.sum() + b.sum()
+    return 1.0 if denom == 0 else 2.0 * np.count_nonzero(a & b) / denom
+
+
+def _reader_vs_consensus_dice(masks: list[np.ndarray], vote: int) -> float | None:
+    """Leave-one-reader-out: each reader scored against the others' consensus.
+
+    This is the *correct* ceiling for a model trained on a fused target, and it
+    is higher than mean pairwise agreement. Predicting a consensus is easier
+    than predicting an individual, because fusing several readers averages out
+    each one's idiosyncratic noise -- so comparing a model's score against the
+    fused mask to reader-vs-reader Dice understates what is achievable.
+
+    Here reader r is compared against the majority vote of the remaining
+    readers, which is the same kind of quantity the model is asked to produce.
+    """
+    if len(masks) < 3:
+        return None
+    scores = []
+    for r in range(len(masks)):
+        others = [m for i, m in enumerate(masks) if i != r]
+        # Scale the vote threshold to the smaller panel, keeping "majority".
+        thr = max(1, min(vote, len(others)))
+        consensus = (np.sum(others, axis=0) >= thr)
+        scores.append(_dice(masks[r], consensus))
+    return float(np.mean(scores))
 
 
 def _pairwise_dice(masks: list[np.ndarray]) -> float | None:
-    """Mean Dice over every pair of reader masks.
-
-    This is the empirical ceiling on achievable Dice: a model cannot
-    meaningfully beat the agreement between the experts who made the labels.
-    """
+    """Mean Dice over every pair of reader masks -- raw annotator agreement."""
     if len(masks) < 2:
         return None
     scores = []
     for i in range(len(masks)):
         for j in range(i + 1, len(masks)):
-            a, b = masks[i].astype(bool), masks[j].astype(bool)
-            denom = a.sum() + b.sum()
             # Two readers who both marked nothing agree perfectly.
-            scores.append(1.0 if denom == 0 else 2.0 * np.count_nonzero(a & b) / denom)
+            scores.append(_dice(masks[i], masks[j]))
     return float(np.mean(scores))
 
 
@@ -99,15 +126,31 @@ def _components(mask: np.ndarray) -> tuple[int, ...]:
     return tuple(areas)
 
 
-def profile_slice(rec: SliceRecord, img_size: int, vote_threshold: int, n_readers: int) -> SliceProfile:
-    img = cv2.imread(rec.image, cv2.IMREAD_GRAYSCALE)
+def profile_slice(
+    rec: SliceRecord,
+    img_size: int,
+    vote_threshold: int,
+    n_readers: int,
+    source=None,
+) -> SliceProfile:
+    """Measure one slice.
+
+    `source` is an optional ZipSource; when given, members are decoded from
+    the zip instead of read from the filesystem. Both paths produce identical
+    arrays, so every number below is unaffected by the choice.
+    """
+    read = source.imread_gray if source is not None else (
+        lambda p: cv2.imread(p, cv2.IMREAD_GRAYSCALE)
+    )
+
+    img = read(rec.image)
     if img is None:
         raise FileNotFoundError(f"could not read image: {rec.image}")
     h, w = img.shape[:2]
 
     masks: list[np.ndarray] = []
     for mp in rec.masks:
-        m = cv2.imread(mp, cv2.IMREAD_GRAYSCALE)
+        m = read(mp)
         if m is None:
             continue
         if m.shape[:2] != (h, w):
@@ -145,6 +188,7 @@ def profile_slice(rec: SliceRecord, img_size: int, vote_threshold: int, n_reader
         resized_px=int(np.count_nonzero(resized)),
         resized_component_areas=_components(resized),
         mean_pairwise_dice=_pairwise_dice(masks),
+        reader_vs_consensus_dice=_reader_vs_consensus_dice(masks, vote_threshold),
     )
 
 
@@ -263,8 +307,17 @@ def aggregate(profiles: list[SliceProfile], cfg: Config, n_readers: int) -> dict
     agreements = [p.mean_pairwise_dice for p in profiles if p.mean_pairwise_dice is not None]
     agreement = {
         **_describe(agreements),
-        "note": "mean pairwise Dice between radiologists; an approximate upper "
-        "bound on achievable model Dice",
+        "note": "mean pairwise Dice between radiologists -- raw annotator "
+        "agreement, NOT the ceiling for a model predicting a fused target",
+    }
+
+    loo = [p.reader_vs_consensus_dice for p in profiles
+           if p.reader_vs_consensus_dice is not None]
+    consensus_ceiling = {
+        **_describe(loo),
+        "note": "each reader vs the majority consensus of the others -- the "
+        "correct ceiling for a model trained on the fused mask, since "
+        "predicting a consensus is easier than predicting an individual",
     }
 
     return {
@@ -275,6 +328,7 @@ def aggregate(profiles: list[SliceProfile], cfg: Config, n_readers: int) -> dict
         "train_img_size": size,
         "sizes": sizes,
         "inter_reader_agreement": agreement,
+        "consensus_ceiling": consensus_ceiling,
     }
 
 
@@ -461,16 +515,40 @@ def write_report(result: dict, out_dir: Path) -> Path:
     ]
 
     ag = agg["inter_reader_agreement"]
+    cc = agg.get("consensus_ceiling", {})
     if ag.get("n"):
         L += [
-            f"Mean pairwise Dice between radiologists: **{ag['mean']:.4f}** "
-            f"(sd {ag['std']:.4f}, median {ag.get('p50')}, p5 {ag.get('p5')})",
+            _md_table(
+                ["quantity", "mean", "sd", "p5", "median", "p95"],
+                [
+                    ["reader vs reader (pairwise)", f"{ag['mean']:.4f}", f"{ag['std']:.4f}",
+                     ag.get("p5"), ag.get("p50"), ag.get("p95")],
+                ] + ([
+                    ["reader vs others' consensus", f"{cc['mean']:.4f}", f"{cc['std']:.4f}",
+                     cc.get("p5"), cc.get("p50"), cc.get("p95")],
+                ] if cc.get("n") else []),
+            ),
             "",
-            "> An approximate ceiling on achievable model Dice. A model scoring "
-            "near this number is at the limit of what the labels can express; "
-            "one scoring above it on the merged mask is likely fitting the "
-            "fusion rule rather than the anatomy.",
+            "**Read the second row, not the first.** Pairwise reader agreement "
+            "measures how much the annotators disagree with each other. It is "
+            "not the ceiling for a model, because the model is trained against "
+            f"the vote->={vt} *fusion* of all readers, and predicting a consensus "
+            "is easier than predicting any individual -- fusing averages out "
+            "each reader's idiosyncratic noise.",
+            "",
+            "The second row is the right comparison: each reader scored against "
+            "the majority consensus of the others, which is the same kind of "
+            "target the model produces.",
         ]
+        if cc.get("n"):
+            L += [
+                "",
+                f"So a model scoring much above **{cc['mean']:.3f}** per-image Dice "
+                "on this target is doing something a radiologist cannot do against "
+                "their colleagues' consensus -- which points at leakage, at an "
+                "easier metric (global rather than per-image Dice), or at fitting "
+                "the fusion rule rather than the anatomy.",
+            ]
     else:
         L.append("Not computable -- fewer than 2 reader masks available.")
 
@@ -569,6 +647,7 @@ def _profile_all(
     subset: list[SliceRecord],
     cfg,
     workers: int,
+    source=None,
 ) -> tuple[list[SliceProfile], list[dict]]:
     """Profile every record, in parallel, preserving input order.
 
@@ -582,7 +661,7 @@ def _profile_all(
 
     def work(rec: SliceRecord):
         try:
-            return profile_slice(rec, size, vt, nr), None
+            return profile_slice(rec, size, vt, nr, source), None
         except Exception as e:
             return None, {"uid": rec.uid, "error": f"{type(e).__name__}: {e}"}
 
@@ -624,17 +703,28 @@ def run(
     max_slices: int | None = None,
     out_dir: Path | None = None,
     workers: int | None = None,
+    zip_path: str | Path | None = None,
 ) -> dict:
     t0 = time.time()
     workers = default_workers() if workers is None else max(1, int(workers))
     out_dir = Path(out_dir or (Path(cfg.out_dir) / "profile"))
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    source = None
+    if zip_path:
+        from .data.zip_source import ZipSource
+
+        print(f"[profile] reading from zip (no extraction): {zip_path}")
+        source = ZipSource(zip_path)
+        index_all = lambda nods: source.build_index(nods, cfg.data.n_readers)  # noqa: E731
+    else:
+        index_all = lambda nods: build_index(cfg.data.root, nods, cfg.data.n_readers)  # noqa: E731
+
     print("[profile] indexing with all nodules")
-    recs_all = build_index(cfg.data.root, None, cfg.data.n_readers)
+    recs_all = index_all(None)
     print("[profile] indexing with nodule-0 only")
     try:
-        recs_n0 = build_index(cfg.data.root, ["nodule-0"], cfg.data.n_readers)
+        recs_n0 = index_all(["nodule-0"])
     except RuntimeError:
         recs_n0 = []
 
@@ -666,7 +756,7 @@ def run(
     # per-file latency dominates completely -- the dataset is only 170MB, but
     # serial reads take tens of minutes. The work is I/O-bound and cv2.imread
     # releases the GIL, so threads give a near-linear speedup.
-    profiles, failures = _profile_all(subset, cfg, workers)
+    profiles, failures = _profile_all(subset, cfg, workers, source)
 
     if not profiles:
         raise RuntimeError(f"profiled nothing; {len(failures)} failures, first: {failures[:1]}")
@@ -674,7 +764,8 @@ def run(
     agg = aggregate(profiles, cfg, cfg.data.n_readers)
 
     result = {
-        "root": str(cfg.data.root),
+        "root": str(zip_path) if zip_path else str(cfg.data.root),
+        "source": "zip" if zip_path else "filesystem",
         "generated": time.strftime("%Y-%m-%d %H:%M:%S"),
         "config": cfg.name,
         "slices_profiled": len(profiles),
@@ -691,6 +782,9 @@ def run(
     md = write_report(result, out_dir)
     write_figures(profiles, agg, out_dir)
 
+    if source is not None:
+        source.close()
+
     if failures:
         print(f"[profile] {len(failures)} slices failed to read (see profile.json)")
     print(f"\n[profile] {result['minutes']} min -> {out_dir}")
@@ -700,13 +794,17 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Profile the LIDC slice dataset")
-    ap.add_argument("--config", required=True)
+    ap.add_argument("--config", required=True,
+                    help="YAML config; supplies img_size, vote_threshold, n_readers")
     ap.add_argument("--set", dest="overrides", nargs="*", default=[], metavar="KEY=VALUE")
     ap.add_argument("--max-slices", type=int, default=None,
                     help="profile a strided sample instead of everything")
     ap.add_argument("--workers", type=int, default=None,
                     help=f"reader threads (default {default_workers()}); the reads are "
                          "I/O-bound on Kaggle, so more than the core count helps")
+    ap.add_argument("--zip", dest="zip_path", default=None,
+                    help="read directly from a dataset .zip instead of an extracted "
+                         "tree; avoids writing ~78k tiny files")
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--print-report", action="store_true",
                     help="echo the markdown report to stdout when done")
@@ -714,7 +812,7 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = load_config(args.config, args.overrides)
     result = run(cfg, args.max_slices, Path(args.out_dir) if args.out_dir else None,
-                 workers=args.workers)
+                 workers=args.workers, zip_path=args.zip_path)
 
     if args.print_report:
         out = Path(args.out_dir or (Path(cfg.out_dir) / "profile")) / "profile.md"

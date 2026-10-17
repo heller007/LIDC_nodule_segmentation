@@ -39,6 +39,9 @@ def _natural_key(s: str):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
 
 
+# Shared with zip_source so both indexers accept exactly the same files.
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+
 # A patient directory is "LIDC-IDRI-" plus digits and nothing else. Matching
 # the prefix alone also matches the dataset's own "LIDC-IDRI-slices" wrapper,
 # which then gets treated as a patient with no nodules.
@@ -127,7 +130,7 @@ def build_index(
                 continue
 
             for img in sorted(img_dir.iterdir(), key=lambda p: _natural_key(p.name)):
-                if img.suffix.lower() not in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}:
+                if img.suffix.lower() not in IMAGE_SUFFIXES:
                     continue
                 masks = tuple(str(d / img.name) for d in mask_dirs if (d / img.name).exists())
                 if not masks:
