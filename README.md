@@ -163,7 +163,20 @@ Before training anything, measure what you are training on:
 ```bash
 python -m lidcseg.profile_data --config configs/improved.yaml
 python -m lidcseg.profile_data --config configs/improved.yaml --max-slices 1500
+python -m lidcseg.profile_data --config configs/improved.yaml --workers 48
 ```
+
+The dataset is only ~170 MB but it is ~29,000 files of ~6 KB each, and
+`/kaggle/input` is network-backed, so **per-file latency dominates** -- serial
+reads take tens of minutes. Reads run on `--workers` threads (default
+`4 x cpu_count`, capped at 32), which is verified to produce byte-identical
+output to the serial path. Raise it if the reported rate still looks slow; the
+work is I/O-bound, not CPU-bound.
+
+Note that attaching a Kaggle dataset via *Add Data* is a mount, not a
+download, and is near-instant. `kagglehub.dataset_download` does fetch over
+the network -- that is what the original notebook called, and why its path was
+`/kaggle/input/datasets/<owner>/<slug>/`.
 
 **No internet or GPU available?** `notebooks/kaggle_profile_standalone.ipynb`
 is a single self-contained notebook with the profiler inlined -- no clone, no

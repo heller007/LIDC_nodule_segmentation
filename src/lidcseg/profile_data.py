@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -554,8 +556,77 @@ def write_figures(profiles: list[SliceProfile], agg: dict, out_dir: Path) -> Non
 # ---------------------------------------------------------------------- main
 
 
-def run(cfg: Config, max_slices: int | None = None, out_dir: Path | None = None) -> dict:
+def default_workers() -> int:
+    """Thread count for the mask reads.
+
+    I/O-bound against a network filesystem, so useful parallelism far exceeds
+    the core count; capped at 32 so a huge machine does not thrash the mount.
+    """
+    return max(4, min(32, (os.cpu_count() or 4) * 4))
+
+
+def _profile_all(
+    subset: list[SliceRecord],
+    cfg,
+    workers: int,
+) -> tuple[list[SliceProfile], list[dict]]:
+    """Profile every record, in parallel, preserving input order.
+
+    Order is preserved via `executor.map` so the output is identical to the
+    serial version regardless of thread scheduling -- aggregates would be the
+    same either way, but a reproducible `profile.json` is worth more than the
+    microseconds saved by `as_completed`.
+    """
+    size, vt, nr = cfg.data.img_size, cfg.data.vote_threshold, cfg.data.n_readers
+    total = len(subset)
+
+    def work(rec: SliceRecord):
+        try:
+            return profile_slice(rec, size, vt, nr), None
+        except Exception as e:
+            return None, {"uid": rec.uid, "error": f"{type(e).__name__}: {e}"}
+
+    profiles: list[SliceProfile] = []
+    failures: list[dict] = []
     t0 = time.time()
+    step = max(total // 20, 1)
+
+    if workers <= 1:
+        results = (work(r) for r in subset)
+    else:
+        pool = ThreadPoolExecutor(max_workers=workers)
+        results = pool.map(work, subset)
+
+    try:
+        for i, (prof, err) in enumerate(results, 1):
+            if prof is not None:
+                profiles.append(prof)
+            else:
+                failures.append(err)
+            if i % step == 0 or i == total:
+                dt = time.time() - t0
+                rate = i / dt if dt > 0 else 0.0
+                eta = (total - i) / rate if rate > 0 else 0.0
+                print(
+                    f"  {i}/{total}  ({100 * i / total:4.1f}%)  "
+                    f"{rate:6.1f} slices/s  eta {eta / 60:4.1f} min",
+                    flush=True,
+                )
+    finally:
+        if workers > 1:
+            pool.shutdown(wait=True)
+
+    return profiles, failures
+
+
+def run(
+    cfg: Config,
+    max_slices: int | None = None,
+    out_dir: Path | None = None,
+    workers: int | None = None,
+) -> dict:
+    t0 = time.time()
+    workers = default_workers() if workers is None else max(1, int(workers))
     out_dir = Path(out_dir or (Path(cfg.out_dir) / "profile"))
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -587,15 +658,15 @@ def run(cfg: Config, max_slices: int | None = None, out_dir: Path | None = None)
     else:
         subset = recs_all
 
-    profiles: list[SliceProfile] = []
-    failures: list[dict] = []
-    for i, rec in enumerate(subset):
-        try:
-            profiles.append(profile_slice(rec, cfg.data.img_size, cfg.data.vote_threshold, cfg.data.n_readers))
-        except Exception as e:
-            failures.append({"uid": rec.uid, "error": f"{type(e).__name__}: {e}"})
-        if (i + 1) % 500 == 0:
-            print(f"  {i + 1}/{len(subset)}")
+    print(f"[profile] reading {len(subset)} slices x {cfg.data.n_readers + 1} files "
+          f"with {workers} threads")
+
+    # Each slice costs 5 file reads (1 image + 4 reader masks), so the full set
+    # is ~29k reads of ~6KB files. On Kaggle's network-backed /kaggle/input the
+    # per-file latency dominates completely -- the dataset is only 170MB, but
+    # serial reads take tens of minutes. The work is I/O-bound and cv2.imread
+    # releases the GIL, so threads give a near-linear speedup.
+    profiles, failures = _profile_all(subset, cfg, workers)
 
     if not profiles:
         raise RuntimeError(f"profiled nothing; {len(failures)} failures, first: {failures[:1]}")
@@ -608,6 +679,7 @@ def run(cfg: Config, max_slices: int | None = None, out_dir: Path | None = None)
         "config": cfg.name,
         "slices_profiled": len(profiles),
         "sampled": sampled,
+        "workers": workers,
         "failures": failures[:50],
         "n_failures": len(failures),
         "counts": counts,
@@ -632,13 +704,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--set", dest="overrides", nargs="*", default=[], metavar="KEY=VALUE")
     ap.add_argument("--max-slices", type=int, default=None,
                     help="profile a strided sample instead of everything")
+    ap.add_argument("--workers", type=int, default=None,
+                    help=f"reader threads (default {default_workers()}); the reads are "
+                         "I/O-bound on Kaggle, so more than the core count helps")
     ap.add_argument("--out-dir", default=None)
     ap.add_argument("--print-report", action="store_true",
                     help="echo the markdown report to stdout when done")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config, args.overrides)
-    result = run(cfg, args.max_slices, Path(args.out_dir) if args.out_dir else None)
+    result = run(cfg, args.max_slices, Path(args.out_dir) if args.out_dir else None,
+                 workers=args.workers)
 
     if args.print_report:
         out = Path(args.out_dir or (Path(cfg.out_dir) / "profile")) / "profile.md"
